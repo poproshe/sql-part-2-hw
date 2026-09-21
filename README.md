@@ -1,87 +1,81 @@
-# Домашнее задание к занятию «SQL. Часть 2»
+# Домашнее задание к занятию «Анализ уязвимостей Metasploitable»
 
 **Ушаков Игорь Юрьевич**
 
 ## Задание 1
 
-```sql
-SELECT
-    st.last_name,
-    st.first_name,
-    c.city,
-    COUNT(cu.customer_id) AS customer_count
-FROM store AS s
-JOIN staff AS st ON st.staff_id = s.manager_staff_id
-JOIN address AS a ON a.address_id = s.address_id
-JOIN city AS c ON c.city_id = a.city_id
-JOIN customer AS cu ON cu.store_id = s.store_id
-GROUP BY st.staff_id, st.last_name, st.first_name, c.city
-HAVING COUNT(cu.customer_id) > 300;
+```В Metasploitable открыты следующие сетевые службы:
+
+Порт	Служба	Версия
+21/tcp	FTP	vsftpd 2.3.4
+22/tcp	SSH	OpenSSH 4.7p1
+23/tcp	Telnet	Linux telnetd
+25/tcp	SMTP	Postfix smtpd
+53/tcp	DNS	ISC BIND 9.4.2
+80/tcp	HTTP	Apache httpd 2.2.8
+111/tcp	RPCBind	v2
+139, 445/tcp	SMB	Samba smbd 3.X
+512/tcp	rexec	netkit-rsh
+513/tcp	rlogin	OpenBSD/Solaris rlogind
+514/tcp	rsh	tcpwrapped
+1099/tcp	Java RMI	GNU Classpath grmiregistry
+1524/tcp	bindshell	Metasploitable root shell
+2049/tcp	NFS	v2-4
+2121/tcp	FTP	ProFTPD 1.3.1
+3306/tcp	MySQL	5.0.51a
+5432/tcp	PostgreSQL	8.3.0–8.3.7
+5900/tcp	VNC	protocol 3.3
+6000/tcp	X11	access denied
+6667/tcp	IRC	UnrealIRCd
+8009/tcp	AJP13	Apache Jserv
+8180/tcp	HTTP	Apache Tomcat 5.5
 ```
+Уязвимости, которые были обнаружены:
+vsftpd 2.3.4 — Backdoor Command Execution
+Ссылка: https://www.exploit-db.com/exploits/17491
+CVE-2011-2523. В дистрибутив vsftpd 2.3.4 был внедрён бэкдор: при отправке имени пользователя, содержащего :), на порту 6200 открывается root-шелл.
+
+UnrealIRCd 3.2.8.1 — Backdoor Command Execution
+Ссылка: https://www.exploit-db.com/exploits/16922
+CVE-2010-2075. В исходный код UnrealIRCd 3.2.8.1 была добавлена вредоносная вставка, позволяющая выполнить произвольные команды через специальную строку.
+
+Samba 3.0.20 < 3.0.25rc3 — Username map script Command Execution
+Ссылка: https://www.exploit-db.com/exploits/16320
+CVE-2007-2447. Уязвимость в опции username map script: через метасимволы оболочки в имени пользователя можно выполнить произвольные команды на сервере.
+
 
 ## Задание 2
 
-```sql
-SELECT COUNT(*) AS films_longer_than_average
-FROM film
-WHERE length > (SELECT AVG(length) FROM film);
+Что я делал
+Запустил Wireshark в Kali Linux, выбрал интерфейс с адресом 172.28.1.146 и поставил фильтр ip.addr == 172.28.1.145, чтобы видеть только трафик между Kali и Metasploitable. Затем по очереди выполнил четыре сканирования, каждый раз останавливал захват и сохранял результат в отдельный файл:
+
 ```
-
-## Задание 3
-
-```sql
-WITH monthly_payments AS (
-    SELECT
-        date_trunc('month', payment_date) AS payment_month,
-        SUM(amount) AS total_amount
-    FROM payment
-    GROUP BY date_trunc('month', payment_date)
-),
-monthly_rentals AS (
-    SELECT
-        date_trunc('month', rental_date) AS rental_month,
-        COUNT(*) AS rental_count
-    FROM rental
-    GROUP BY date_trunc('month', rental_date)
-)
-SELECT
-    to_char(p.payment_month, 'YYYY-MM') AS payment_month,
-    p.total_amount,
-    COALESCE(r.rental_count, 0) AS rental_count
-FROM monthly_payments AS p
-LEFT JOIN monthly_rentals AS r ON r.rental_month = p.payment_month
-ORDER BY p.total_amount DESC
-LIMIT 1;
+sudo nmap -sS -p 1-1000 172.28.1.145   # SYN
+sudo nmap -sF -p 1-1000 172.28.1.145   # FIN
+sudo nmap -sX -p 1-1000 172.28.1.145   # Xmas
+sudo nmap -sU -p 1-1000 172.28.1.145   # UDP
 ```
+Потом разобрал каждый файл через tshark и посмотрел, какие пакеты туда попали.
 
-## Задание 4*
+Чем режимы отличаются с точки зрения трафика
+SYN-сканирование (-sS) — это «полуоткрытое» сканирование. nmap шлёт на каждый порт пакет с одним флагом SYN. В моём захвате это видно как поток пакетов от 172.28.1.146 к 172.28.1.145 с флагом 0x0002. Дальше поведение зависит от порта: если порт открыт, сервер отвечает SYN+ACK (0x0012), а nmap, получив этот ответ, сразу отправляет RST (0x0004) — то есть соединение не устанавливается до конца, сканер просто «прощупывает» порт. Если порт закрыт, сервер сам отвечает RST+ACK (0x0014), и на этом всё заканчивается. Именно так в моём файле syn_scan.pcapng: на порты 22, 23, 21, 25, 80, 139, 445, 111 пришли SYN+ACK, а на 113, 110, 587, 995 — RST+ACK.
 
-```sql
-SELECT
-    st.staff_id,
-    st.last_name,
-    st.first_name,
-    COUNT(p.payment_id) AS sales_count,
-    CASE
-        WHEN COUNT(p.payment_id) > 8000 THEN 'Да'
-        ELSE 'Нет'
-    END AS "Премия"
-FROM staff AS st
-LEFT JOIN payment AS p ON p.staff_id = st.staff_id
-GROUP BY st.staff_id, st.last_name, st.first_name
-ORDER BY st.staff_id;
-```
+FIN-сканирование (-sF) — здесь nmap шлёт пакет только с флагом FIN (0x0001). Логика такая: по стандарту TCP открытый порт должен просто проигнорировать такой пакет, потому что это не начало соединения, а его завершение, которого не было. Закрытый порт на любой непонятный пакет отвечает RST. В моём файле fin_scan.pcapng это отлично видно: на закрытые порты (256, 143, 443, 993, 587, 554, 113, 135, 199, 110, 995 и другие) прилетели RST+ACK (0x0014), а на открытые (22, 21, 23, 25, 80, 139, 445) — тишина, там только исходящие FIN и ни одного ответа.
 
-## Задание 5*
+Xmas-сканирование (-sX) — это то же самое, что FIN, но с другой комбинацией флагов. nmap выставляет сразу FIN, PSH и URG (0x0029) — пакет получается «светящимся всеми флагами», отсюда и название «рождественская ёлка». Принцип тот же: открытые порты молчат, закрытые отвечают RST. В моём xmas_scan.pcapng картина полностью повторяет FIN-скан: на закрытые порты (443, 587, 143, 113, 993, 135, 554, 110, 199, 256, 995, 385, 947, 895) пришли RST+ACK, а открытые (22, 21, 23, 25, 80, 139, 445) не ответили ничем.
 
-```sql
-SELECT f.film_id, f.title
-FROM film AS f
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM inventory AS i
-    JOIN rental AS r ON r.inventory_id = i.inventory_id
-    WHERE i.film_id = f.film_id
-)
-ORDER BY f.title;
-```
+UDP-сканирование (-sU) — работает совсем по-другому, потому что UDP не устанавливает соединений. nmap просто отправляет пустой UDP-пакет на каждый порт. Если порт закрыт, операционная система отвечает ICMP-сообщением «Destination Unreachable, Port Unreachable» (тип 3). Если порт открыт, служба может ответить каким-то UDP-пакетом, а может и промолчать — тут всё зависит от конкретного сервиса. В моём файле udp-scan.pcapng видно, как сканер шлёт UDP-пакеты с порта 63538 на разные порты Metasploitable, а в ответ прилетают ICMP-сообщения с типом 3 от 172.28.1.145. Это значит, что эти порты закрыты. UDP-сканирование самое медленное из всех, потому что ICMP-ответы приходят не всегда и приходится ждать таймаутов.
+
+Как отвечает сервер
+Если коротко, то картина такая:
+
+Режим	Открытый порт	Закрытый порт
+SYN	SYN+ACK	RST
+FIN	нет ответа	RST
+Xmas	нет ответа	RST
+UDP	UDP-ответ или тишина	ICMP Port Unreachable
+То есть при SYN-сканировании сервер активно отвечает на каждый порт: открытые подтверждают готовность к соединению, закрытые сразу его сбрасывают. При FIN и Xmas сервер ведёт себя одинаково — молчит на открытых портах и сбрасывает закрытые. А при UDP-сканировании сервер отвечает только на закрытые порты, и то не TCP-пакетом, а ICMP-ошибкой.
+
+В Wireshark все эти различия видны по флагам TCP и по типу ответа. Например, в SYN-скане последовательность 0x0002 → 0x0012 → 0x0004 означает «запрос → подтверждение → сброс», а в FIN-скане 0x0001 → 0x0014 — «запрос → сброс». В UDP-скане вместо TCP-флагов вообще ничего нет, зато есть ICMP-пакеты с типом 3.
+
+
