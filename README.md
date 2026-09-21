@@ -74,7 +74,5 @@ Xmas	нет ответа	RST
 UDP	UDP-ответ или тишина	ICMP Port Unreachable
 В Wireshark это видно по TCP-флагам: в SYN-скане 0x0002 → 0x0012 → 0x0004, в FIN-скане 0x0001 → 0x0014, в Xmas-скане 0x0029 → 0x0014. В UDP-скане вместо TCP-флагов — ICMP-пакеты с типом 3.
 
-![Название скриншота 2]([ссылка на скриншот 2](https://github.com/poproshe/sql-part-2-hw/blob/main/1.png))
-![Название скриншота 2]([ссылка на скриншот 2](https://github.com/poproshe/sql-part-2-hw/blob/main/2.png))
-![Название скриншота 2]([ссылка на скриншот 2](https://github.com/poproshe/sql-part-2-hw/blob/main/3.png))
-![Название скриншота 2]([ссылка на скриншот 2](https://github.com/poproshe/sql-part-2-hw/blob/main/4.png))
+![1](https://github.com/poproshe/sql-part-2-hw/blob/main/1.png))
+
